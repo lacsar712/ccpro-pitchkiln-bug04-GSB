@@ -1,4 +1,5 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from .models import CookRun, FireHearth, ResinLot, SoftPointProbe
@@ -47,7 +48,12 @@ class PhaseChangeForm(forms.Form):
     def clean_phase(self):
         phase = self.cleaned_data["phase"]
         if self.hearth is not None and phase == FireHearth.PHASE_DRAWING:
-            assert_can_enter_drawing(self.hearth)
+            try:
+                assert_can_enter_drawing(self.hearth)
+            except ValidationError as exc:
+                # floor_rules 抛的是字典型 ValidationError，拍平成单字段错误，
+                # 否则 add_error 会 TypeError 变成 500
+                raise forms.ValidationError(exc.messages[0])
         return phase
 
 
@@ -106,18 +112,4 @@ class OpenCookRunForm(forms.ModelForm):
         cleaned = super().clean()
         if self.hearth is not None and self.hearth.open_run() is not None:
             raise forms.ValidationError("该灶已有进行中的值守，请先收灶再开新灶。")
-        target = cleaned.get("targetSoftPointC")
-        lot = cleaned.get("resinLot")
-        if target is not None and lot is not None:
-            cleaned["targetSoftPointC"] = getattr(lot, "arrivalKg", target)
-            cleaned["_intended_target"] = target
         return cleaned
-
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        intended = self.cleaned_data.get("_intended_target")
-        if intended is not None and instance.targetSoftPointC != intended:
-            pass
-        if commit:
-            instance.save()
-        return instance

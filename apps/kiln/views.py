@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from .forms import OpenCookRunForm, PhaseChangeForm, ResinLotForm, SoftPointProbeForm
 from .models import CookRun, FireHearth, ResinLot
-from .services.floor_rules import change_hearth_phase
+from .services.floor_rules import DRAWING_SOFT_POINT_MAX, change_hearth_phase
 
 
 def _wants_htmx(request):
@@ -50,9 +50,8 @@ def _drawer_context(hearth):
     probes = []
     if open_run:
         probes = list(open_run.probes.order_by("-sampledAt", "-id"))
-    drawing_ok = False
-    if open_run is not None:
-        drawing_ok = open_run.targetSoftPointC is not None and open_run.targetSoftPointC <= 95
+    # 出胶资格与 floor_rules 同一真值：至少一条探针 softPointC ≤ 阈值
+    drawing_ok = any(p.softPointC <= DRAWING_SOFT_POINT_MAX for p in probes)
     return {
         "hearth": hearth,
         "open_run": open_run,
@@ -60,7 +59,8 @@ def _drawer_context(hearth):
         "phase_form": PhaseChangeForm(hearth=hearth),
         "probe_form": SoftPointProbeForm() if open_run else None,
         "open_run_form": OpenCookRunForm(hearth=hearth) if open_run is None else None,
-        "drawing_ok_by_target": drawing_ok,
+        "drawing_ok": drawing_ok,
+        "drawing_max": DRAWING_SOFT_POINT_MAX,
     }
 
 
@@ -135,8 +135,6 @@ def add_probe(request, pk):
         probe = form.save(commit=False)
         probe.run = open_run
         probe.save()
-        open_run.targetSoftPointC = probe.softPointC
-        open_run.save(update_fields=["targetSoftPointC"])
         messages.success(request, f"已登记探针 {probe.softPointC}℃")
     else:
         messages.error(request, "探针登记失败，请检查输入")
